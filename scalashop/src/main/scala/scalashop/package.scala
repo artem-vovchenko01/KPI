@@ -45,9 +45,24 @@ package object scalashop extends BoxBlurKernelInterface {
 
   /** Computes the blurred RGBA value of a single pixel of the input image. */
   def boxBlurKernel(src: Img, x: Int, y: Int, radius: Int): RGBA = {
+    if (radius == 0) src(x, y)
+    else {
+      var count = 0
+      var resR, resG, resB, resA = 0
+      var curX = clamp(x - radius, 0, src.width)
+      while (curX <= clamp(x + radius, 0, src.width - 1)) {
+          var curY = clamp(y - radius, 0, src.height)
+          while (curY <= clamp(y + radius, 0, src.height - 1)) {
+              val pixel = src(curX, curY)
+              count += 1
+              resR += red(pixel); resG += green(pixel); resB += blue(pixel); resA += alpha(pixel)
+              curY += 1
+            }
+            curX += 1
+      }
 
-    // TODO implement using while loops
-   ???
+      rgba(resR / count, resG / count, resB / count, resA / count)
+    }
   }
 
   val forkJoinPool = new ForkJoinPool

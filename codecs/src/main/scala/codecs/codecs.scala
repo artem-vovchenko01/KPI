@@ -85,11 +85,12 @@ trait EncoderInstances {
     Encoder.fromFunction(n => Json.Num(BigDecimal(n)))
 
   /** An encoder for `String` values */
-  implicit val stringEncoder: Encoder[String] = ??? // TODO Implement the `Encoder[String]` instance
+  implicit val stringEncoder: Encoder[String] =
+    Encoder.fromFunction(s => Json.Str(s))
 
   /** An encoder for `Boolean` values */
-  // TODO Define an implicit value of type `Encoder[Boolean]`
-  implicit val boolEncoder: Encoder[Boolean] = ???
+  implicit val boolEncoder: Encoder[Boolean] = 
+    Encoder.fromFunction(b => Json.Bool(b))
 
   /**
     * Encodes a list of values of type `A` into a JSON array containing
@@ -193,31 +194,39 @@ trait DecoderInstances {
     Decoder.fromPartialFunction { case Json.Null => () }
 
   /** A decoder for `Int` values. Hint: use the `isValidInt` method of `BigDecimal`. */
-  // TODO Define an implicit value of type `Decoder[Int]`
-  implicit val intDecoder: Decoder[Int] = ???
+  implicit val intDecoder: Decoder[Int] = 
+    Decoder.fromPartialFunction { case Json.Num(x) if x.isValidInt => x.toInt }
+    // if BigDecimal.isValidInt(x.value) 
 
   /** A decoder for `String` values */
-  // TODO Define an implicit value of type `Decoder[String]`
-  implicit val stringDecoder: Decoder[String] = ???
+  implicit val stringDecoder: Decoder[String] = 
+    Decoder.fromPartialFunction { case x: Json.Str => x.value }
 
   /** A decoder for `Boolean` values */
-  // TODO Define an implicit value of type `Decoder[Boolean]`
-  implicit val boolDecoder: Decoder[Boolean] = ???
+  implicit val boolDecoder: Decoder[Boolean] = 
+    Decoder.fromPartialFunction { case x: Json.Bool => x.value }
 
   /**
     * A decoder for JSON arrays. It decodes each item of the array
     * using the given `decoder`. The resulting decoder succeeds only
     * if all the JSON array items are successfully decoded.
     */
-  // TODO
-  implicit def listDecoder[A](implicit decoder: Decoder[A]): Decoder[List[A]] = ???
+  implicit def listDecoder[A](implicit decoder: Decoder[A]): Decoder[List[A]] = 
+    Decoder.fromPartialFunction { case arr: Json.Arr => arr.items.map(i => decoder.decode(i).get) }
 
   /**
     * A decoder for JSON objects. It decodes the value of a field of
     * the supplied `name` using the given `decoder`.
     */
-    // TODO
-  def field[A](name: String)(implicit decoder: Decoder[A]): Decoder[A] = ???
+  def field[A](name: String)(implicit decoder: Decoder[A]): Decoder[A] = 
+    Decoder.fromFunction //{ case obj: Json.Obj => decoder.decode(obj.fields(name)).get }
+    {
+      case Json.Obj(mp) => mp.get(name) match {
+        case None => None 
+        case v => v.get.decodeAs[A]
+      }
+    }
+
 }
 
 case class Person(name: String, age: Int)
@@ -234,7 +243,13 @@ trait PersonCodecs {
 
   /** The corresponding decoder for `Person` */
   // TODO Define he decoder for `Person`
-  implicit val personDecoder: Decoder[Person] = ???
+  implicit val personDecoder: Decoder[Person] = 
+    // Decoder.fromPartialFunction { case j: Json.Obj => 
+    //   Person(j.fields("name").decodeAs[String].get, j.fields("age").decodeAs[Int].get) }
+
+    Decoder.field[String]("name")
+      .zip(Decoder.field[Int]("age"))
+      .transform[Person](j => Person(j._1, j._2))
 }
 
 case class Contacts(people: List[Person])
@@ -249,7 +264,33 @@ trait ContactsCodecs {
   // array of values of type `Person` (reuse the `Person` codecs)
 
   /** The encoder for `Contacts` */
+  implicit val contactEncoder: Encoder[Contacts] =
+    ObjectEncoder.field[List[Person]]("people")
+    .transform[Contacts](contacts => contacts.people)
 
+  /** The decoder for `Contacts` */
+  implicit val contactDecoder: Decoder[Contacts] =
+    Decoder.fromPartialFunction { case j: Json.Obj => 
+        Contacts(j.fields("people").decodeAs[List[Person]].get) }
+}
+
+// individual task
+case class Author(name: String, surname: String)
+
+object Author extends AuthorCodecs
+
+trait AuthorCodecs {
+  /** Encoder for `Author` */
+  implicit val authorEncoder: Encoder[Author] =
+    ObjectEncoder.field[String]("name")
+      .zip(ObjectEncoder.field[String]("surnme"))
+      .transform[Author](author => (author.name, author.surname))
+
+  /** The corresponding decoder for `Author` */
+  implicit val authorDecoder: Decoder[Author] = 
+    Decoder.field[String]("name")
+      .zip(Decoder.field[String]("surname"))
+      .transform[Author](j => Author(j._1, j._2))
 }
 
 // In case you want to try your code, here is a simple `Main`
@@ -259,19 +300,34 @@ object Main {
   import Util._
 
   def main(args: Array[String]): Unit = {
+    /** renderJson */
+    println("Testing renderJson")
     println(renderJson(42))
     println(renderJson("foo"))
 
     val maybeJsonString = parseJson(""" "foo" """)
     val maybeJsonObj    = parseJson(""" { "name": "Alice", "age": 42 } """)
     val maybeJsonObj2   = parseJson(""" { "name": "Alice", "age": "42" } """)
-    // Uncomment the following lines as you progress in the assignment
-//     println(maybeJsonString.flatMap(_.decodeAs[Int]))
-//     println(maybeJsonString.flatMap(_.decodeAs[String]))
-//     println(maybeJsonObj.flatMap(_.decodeAs[Person]))
-//     println(maybeJsonObj2.flatMap(_.decodeAs[Person]))
-//     println(renderJson(Person("Bob", 66)))
-  }
 
+    /** Testing different decoders */
+    println("\nTesting decoders")
+    println(maybeJsonString.flatMap(_.decodeAs[Int]))
+    println(maybeJsonString.flatMap(_.decodeAs[String]))
+    println(maybeJsonObj.flatMap(_.decodeAs[Person]))
+    println(maybeJsonObj2.flatMap(_.decodeAs[Person]))
+    println(renderJson(Person("Bob", 66)))
+
+    /** Testing Contacts */
+    println("\nTesting contacts")
+    val contacts = Contacts(List(Person("Artem", 20), Person("John", 25)))
+    val contactsJson = renderJson(contacts)
+    println(contactsJson)
+    val parsedContacts = parseJson(contactsJson)
+    println(parsedContacts)
+    println(parsedContacts.flatMap(_.decodeAs[Contacts]))
+
+    // val decoder = implicitly[Decoder[Contacts]]
+    // val decoder = Decoder.decode(Contacts.contactDecoder.decode)
+  }
 
 }
